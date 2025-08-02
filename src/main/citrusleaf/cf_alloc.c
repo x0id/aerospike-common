@@ -26,27 +26,39 @@
 #include <string.h>
 
 void*
+trace_alloc(size_t sz, void *ptr)
+{
+    return ptr;
+}
+
+void
+trace_free(void *ptr)
+{
+}
+
+void*
 cf_malloc(size_t sz)
 {
-	return malloc(sz);
+	return trace_alloc(sz, malloc(sz));
 }
 
 void*
 cf_calloc(size_t nmemb, size_t sz)
 {
-	return calloc(nmemb, sz);
+	return trace_alloc(nmemb * sz, calloc(nmemb, sz));
 }
 
 void*
 cf_realloc(void *ptr, size_t sz)
 {
-	return realloc(ptr,sz);
+    trace_free(ptr);
+	return trace_alloc(sz, realloc(ptr,sz));
 }
 
 void*
 cf_strdup(const char *s)
 {
-	return strdup(s);
+	return trace_alloc(strlen(s), strdup(s));
 }
 
 void*
@@ -62,7 +74,7 @@ cf_strndup(const char *s, size_t n)
 	t[len] = 0;
 	return memcpy(t, s, len);
 #else
-	return strndup(s, n);
+	return trace_alloc(strnlen(s, n), strndup(s, n));
 #endif
 }
 
@@ -74,13 +86,14 @@ cf_valloc(size_t sz)
 	// Since this file is for the client only, just return null.
 	return NULL;
 #else
-	return valloc(sz);
+	return trace_alloc(sz, valloc(sz));
 #endif
 }
 
 void
 cf_free(void *p)
 {
+    trace_free(p);
 	free(p);
 }
 
@@ -94,7 +107,7 @@ cf_rc_reserve(void* addr)
 void*
 cf_rc_alloc(size_t sz)
 {
-	cf_rc_hdr* head = malloc(sizeof(cf_rc_hdr) + sz);
+	cf_rc_hdr* head = cf_malloc(sizeof(cf_rc_hdr) + sz);
 
 	head->count = 1;
 	head->sz = (uint32_t)sz;
@@ -106,6 +119,7 @@ void
 cf_rc_free(void* addr)
 {
 	cf_rc_hdr* head = (cf_rc_hdr*)addr - 1;
+    trace_free(head);
 	free(head);
 }
 
@@ -130,6 +144,7 @@ cf_rc_releaseandfree(void* addr)
 	uint32_t rc = as_aaf_uint32_rls(&head->count, -1);
 
 	if (rc == 0) {
+        trace_free(head);
 		free(head);
 	}
 
