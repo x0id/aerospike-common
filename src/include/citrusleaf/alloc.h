@@ -34,6 +34,7 @@ extern "C" {
  *  These functions simply wrap the C standard library memory allocation-related functions.
  */
 
+AS_EXTERN size_t cf_allocated();
 AS_EXTERN void* cf_malloc(size_t sz);
 AS_EXTERN void* cf_calloc(size_t nmemb, size_t sz);
 AS_EXTERN void* cf_realloc(void* ptr, size_t sz);

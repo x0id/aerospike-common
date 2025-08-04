@@ -24,131 +24,130 @@
 #include <aerospike/as_atomic.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdatomic.h>
 
-void*
-trace_alloc(size_t sz, void *ptr)
-{
-    return ptr;
-}
+atomic_size_t allocated;
 
-void
-trace_free(void *ptr)
+size_t cf_allocated()
 {
+    return allocated;
 }
 
 void*
 cf_malloc(size_t sz)
 {
-	return trace_alloc(sz, malloc(sz));
+    sz += sizeof(size_t);
+    void *p = malloc(sz);
+    *(size_t *)p = sz;
+    atomic_fetch_add(&allocated, sz);
+    return (char *)p + sizeof(size_t);
 }
 
 void*
 cf_calloc(size_t nmemb, size_t sz)
 {
-	return trace_alloc(nmemb * sz, calloc(nmemb, sz));
+    return cf_malloc(nmemb * sz);
 }
 
 void*
 cf_realloc(void *ptr, size_t sz)
 {
-    trace_free(ptr);
-	return trace_alloc(sz, realloc(ptr,sz));
+    if (ptr == NULL) return cf_malloc(sz);
+    void *p = (char *)ptr - sizeof(size_t);
+    size_t sz_ = *(size_t *)p;
+    p = realloc(p, sz + sizeof(size_t));
+    *(size_t *)p = sz;
+    atomic_fetch_add(&allocated, sz - sz_);
+    return (char *)p + sizeof(size_t);
 }
 
 void*
 cf_strdup(const char *s)
 {
-	return trace_alloc(strlen(s), strdup(s));
+    size_t n = strlen(s);
+    void *p = cf_malloc(n + 1);
+    if (p == NULL) return NULL;
+    return strcpy(p, s);
 }
 
 void*
 cf_strndup(const char *s, size_t n)
 {
-#if defined(_MSC_VER)
-	size_t len = strnlen(s, n);
-	char* t = cf_malloc(len + 1);
-
-	if (t == NULL) {
-		return NULL;
-	}
-	t[len] = 0;
-	return memcpy(t, s, len);
-#else
-	return trace_alloc(strnlen(s, n), strndup(s, n));
-#endif
+    size_t l = strlen(s);
+    if (l < n) n = l;
+    void *p = cf_malloc(n + 1);
+    if (p == NULL) return NULL;
+    return strncpy(p, s, n);
 }
 
 void*
 cf_valloc(size_t sz)
 {
-#if defined(_MSC_VER) || defined(__FreeBSD__)
-	// valloc is not used by the client.
-	// Since this file is for the client only, just return null.
-	return NULL;
-#else
-	return trace_alloc(sz, valloc(sz));
-#endif
+    // valloc is not used by the client.
+    // Since this file is for the client only, just return null.
+    return NULL;
 }
 
 void
-cf_free(void *p)
+cf_free(void *ptr)
 {
-    trace_free(p);
-	free(p);
+    if (ptr == NULL) return;
+    void *p = (char *)ptr - sizeof(size_t);
+    size_t sz = *(size_t *)p;
+    atomic_fetch_sub(&allocated, sz);
+    free(p);
 }
 
 uint32_t
 cf_rc_reserve(void* addr)
 {
-	cf_rc_hdr* head = (cf_rc_hdr*)addr - 1;
-	return as_aaf_uint32(&head->count, 1);
+    cf_rc_hdr* head = (cf_rc_hdr*)addr - 1;
+    return as_aaf_uint32(&head->count, 1);
 }
 
 void*
 cf_rc_alloc(size_t sz)
 {
-	cf_rc_hdr* head = cf_malloc(sizeof(cf_rc_hdr) + sz);
+    cf_rc_hdr* head = cf_malloc(sizeof(cf_rc_hdr) + sz);
 
-	head->count = 1;
-	head->sz = (uint32_t)sz;
+    head->count = 1;
+    head->sz = (uint32_t)sz;
 
-	return head + 1;
+    return head + 1;
 }
 
 void
 cf_rc_free(void* addr)
 {
-	cf_rc_hdr* head = (cf_rc_hdr*)addr - 1;
-    trace_free(head);
-	free(head);
+    cf_rc_hdr* head = (cf_rc_hdr*)addr - 1;
+    cf_free(head);
 }
 
 uint32_t
 cf_rc_release(void* addr)
 {
-	cf_rc_hdr* head = (cf_rc_hdr*)addr - 1;
-	uint32_t rc = as_aaf_uint32_rls(&head->count, -1);
+    cf_rc_hdr* head = (cf_rc_hdr*)addr - 1;
+    uint32_t rc = as_aaf_uint32_rls(&head->count, -1);
 
-	if (rc == 0) {
-		// Subsequent destructor may require an 'acquire' barrier.
-		as_fence_acq();
-	}
+    if (rc == 0) {
+        // Subsequent destructor may require an 'acquire' barrier.
+        as_fence_acq();
+    }
 
-	return rc;
+    return rc;
 }
 
 uint32_t
 cf_rc_releaseandfree(void* addr)
 {
-	cf_rc_hdr* head = (cf_rc_hdr*)addr - 1;
-	uint32_t rc = as_aaf_uint32_rls(&head->count, -1);
+    cf_rc_hdr* head = (cf_rc_hdr*)addr - 1;
+    uint32_t rc = as_aaf_uint32_rls(&head->count, -1);
 
-	if (rc == 0) {
-        trace_free(head);
-		free(head);
-	}
+    if (rc == 0) {
+        cf_free(head);
+    }
 
-	return rc;
+    return rc;
 }
 
 #endif // defined(ENHANCED_ALLOC)
