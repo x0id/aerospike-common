@@ -36,8 +36,8 @@ size_t cf_allocated()
 void*
 cf_malloc(size_t sz)
 {
-    sz += sizeof(size_t);
-    void *p = malloc(sz);
+    void *p = malloc(sz + sizeof(size_t));
+    if (p == NULL) return NULL;
     *(size_t *)p = sz;
     atomic_fetch_add(&allocated, sz);
     return (char *)p + sizeof(size_t);
@@ -56,28 +56,31 @@ cf_realloc(void *ptr, size_t sz)
     void *p = (char *)ptr - sizeof(size_t);
     size_t sz_ = *(size_t *)p;
     p = realloc(p, sz + sizeof(size_t));
+    if (p == NULL) return NULL;
     *(size_t *)p = sz;
     atomic_fetch_add(&allocated, sz - sz_);
     return (char *)p + sizeof(size_t);
 }
 
 void*
-cf_strdup(const char *s)
+cf_strdup(const char *str)
 {
-    size_t n = strlen(s);
-    void *p = cf_malloc(n + 1);
-    if (p == NULL) return NULL;
-    return strcpy(p, s);
+    size_t n = strlen(str);
+    char *dup = cf_malloc(n + 1);
+    if (dup == NULL) return NULL;
+    return strcpy(dup, str);
 }
 
 void*
-cf_strndup(const char *s, size_t n)
+cf_strndup(const char *str, size_t n)
 {
-    size_t l = strlen(s);
+    size_t l = strlen(str);
     if (l < n) n = l;
-    void *p = cf_malloc(n + 1);
-    if (p == NULL) return NULL;
-    return strncpy(p, s, n);
+    char *dup = cf_malloc(n + 1);
+    if (dup == NULL) return NULL;
+    strncpy(dup, str, n);
+    dup[n] = 0;
+    return dup;
 }
 
 void*
